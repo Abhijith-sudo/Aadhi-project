@@ -6,10 +6,14 @@ from PIL import Image
 from torchvision.transforms import transforms
 import io
 import os
+import smtplib
+from email.message import EmailMessage
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'  # Updated upload folder
-ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg','m4a'}
+ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg','m4a','flac'}
+MAIL_PASS = os.getenv("MAIL_PASS")
+SENDER_ADDR = os.getenv("SENDER_ADDR")
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
@@ -61,10 +65,41 @@ def process_file(filename, model):
     predict = outputs.argmax(dim=1).cpu().detach().numpy().ravel()[0]
 
     return predict
+def send_email(subject, body, to_emails):
+    sender_email = SENDER_ADDR
+    sender_password = MAIL_PASS
+    msg = EmailMessage()
+    msg.set_content(body)
+    msg['Subject'] = subject
+    msg['From'] = sender_email
+    
+    # Check if to_emails is a list, and join addresses with commas if it is
+    if isinstance(to_emails, list):
+        msg['To'] = ', '.join(to_emails)
+    else:
+        msg['To'] = to_emails
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(sender_email, sender_password)
+            smtp.send_message(msg)
+        print("Email sent successfully!")
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/uploads', methods=['GET'])
+def list_uploads():
+    try:
+        files = os.listdir(app.config['UPLOAD_FOLDER'])
+        files = [f for f in files if os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], f))]
+        return jsonify({'files': files})
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -85,6 +120,7 @@ def predict():
 
     # Save the uploaded audio file to the upload folder
     audio_path = os.path.join(app.config['UPLOAD_FOLDER'], audio_file.filename)
+    audio_path = audio_path.replace('\\', '/')
 
     audio_file.save(audio_path)
 
@@ -93,11 +129,19 @@ def predict():
         evaluation_result = process_file(audio_path, model)
         evaluation_result_bool = bool(evaluation_result)
 
+
+        if evaluation_result == 1:
+            subject = "Alert: Positive Evaluation Result"
+            body = "THERE IS A DANGER SITUATION!!!.TAKE IMMEDIATE ACTION."
+            to_emails=["aadiii9411@gmail.com", "avadarsh812@gmail.com", "1149bads@gmail.com"]
+            send_email(subject, body, to_emails)
+
         return jsonify({
             'result': str(evaluation_result),
             'evaluation_result': evaluation_result_bool
         })
     except Exception as e:
+        print(e)
         return jsonify({'error': str(e)})
     
 if __name__ == '__main__':
